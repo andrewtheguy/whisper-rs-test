@@ -25,7 +25,7 @@ rand = "0.8.5"
 # That said, it's not ideal for all scenarios and in particular, generic
 # libraries built around `rusqlite` should probably not enable it, which
 # is why it is not a default feature -- it could become hard to disable.
-rusqlite = { version = "0.32.0", features = ["bundled"] }
+#rusqlite = { version = "0.32.0", features = ["bundled"] }
 serde = "1.0.210"
 toml = "0.8.19"
 zhconv = "0.3.1"
@@ -33,6 +33,7 @@ dirs = "5.0.1"
 reqwest = "0.12.8"
 tempfile = "3.13.0"
 url = "2.5.2"
+sqlx = { version = "0.8.2", features = ["sqlite","runtime-tokio"] }
 
 [dependencies.whisper-rs]
 git = "https://github.com/tazz4843/whisper-rs"
