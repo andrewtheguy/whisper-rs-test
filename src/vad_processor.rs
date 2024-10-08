@@ -2,12 +2,13 @@ use hound::{self};
 use reqwest::get;
 use sqlx::{sqlite::SqliteQueryResult, Pool, SqlitePool};
 use tempfile::NamedTempFile;
+use tokio::{runtime::Builder, task::JoinSet};
 use url::Url;
 
 use crate::{config::Config, silero::{self, Silero}, streaming::streaming_url, utils};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
-use std::{fs::{self}, io::Write, path::Path, time::{SystemTime, UNIX_EPOCH}};
+use std::{fs::{self}, future::Future, io::Write, path::Path, pin::Pin, sync::{Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}};
 use serde_json::json;
 
 use zhconv::{zhconv, Variant};
@@ -307,49 +308,69 @@ pub async fn transcribe_url(config: Config) -> Result<(), Box<dyn std::error::Er
 
     //let mut file = File::create("transcript.jsonl").expect("failed to create file");
 
-    let rt = tokio::runtime::Handle::try_current()?;
+// build runtime
+let rt2 = tokio::runtime::Builder::new_multi_thread()
+.worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
 
 
     let language = config.language.clone();
-    params.set_segment_callback_safe(   move |data: whisper_rs::SegmentCallbackData| {
-        
-        let start = SystemTime::now();
-        let since_the_epoch = start
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards");
 
-        let line = json!({"start_timestamp":data.start_timestamp,
-            "end_timestamp":data.end_timestamp, "cur_ts": since_the_epoch.as_millis() as f64/1000.0, "text":data.text});
-        println!("{}", line);
+    let set = Arc::new(Mutex::new(JoinSet::new()));
 
-        // only convert to traditional chinese when saving to db
-        // output original in jsonl
-        let db_save_text = match language.as_str() {
-            "zh" | "yue" => {
-                zhconv(&data.text, Variant::ZhHant)
-            },
-            _ => {
-                data.text
-            }
-        };
+    let set_clone = Arc::clone(&set);
+params.set_segment_callback_safe(move |data: whisper_rs::SegmentCallbackData| {
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
 
-        
-async{
-        if let Some(pool2) = &pool {
-            // Insert data into the table
-            sqlx::query(
-                r#"
-                "INSERT INTO transcripts (timestamp, content) VALUES (gfdgfdgdf)"
-                "#,
-            )
-            .bind(since_the_epoch.as_millis() as f64/1000.0)
-            .bind(db_save_text)
-            .execute(pool2).await.expect("failed to insert data into the table");
-            //rt.block_on(fut).expect("failed to insert data into the table");
+    let line = json!({"start_timestamp":data.start_timestamp,
+        "end_timestamp":data.end_timestamp, "cur_ts": since_the_epoch.as_millis() as f64/1000.0, "text":data.text});
+    println!("{}", line);
+
+    // only convert to traditional chinese when saving to db
+    // output original in jsonl
+    let db_save_text = match language.as_str() {
+        "zh" | "yue" => {
+            zhconv(&data.text, Variant::ZhHant)
+        },
+        _ => {
+            data.text
         }
-};
+    };
 
-    });
+    let pool2 = pool.clone();
+    let set_clone = Arc::clone(&set_clone);
+    
+    rt2.block_on(async move {
+            if let Some(pool2) = pool2 {
+                // Insert data into the table
+                sqlx::query::<sqlx::Sqlite>(
+                    r#"
+                    INSERT INTO transcripts (timestamp, content) VALUES (jhgjgjgh)
+                    "#,
+                )
+                .bind(since_the_epoch.as_millis() as f64/1000.0)
+                .bind(db_save_text)
+                .execute(&pool2)
+                .await
+                .expect("Failed to insert data into the table");
+        
+                println!("Data inserted into the table");
+            }
+        });
+    
+});
+
+    
+let mut set = set.lock().unwrap();
+
+while let Some(res) = set.join_next().await {
+    res?;
+}
 
 
     let mut state = ctx.create_state().expect("failed to create key");

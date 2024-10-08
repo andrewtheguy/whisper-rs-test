@@ -34,6 +34,7 @@ reqwest = "0.12.8"
 tempfile = "3.13.0"
 url = "2.5.2"
 sqlx = { version = "0.8.2", features = ["sqlite","runtime-tokio"] }
+futures = "0.3.31"
 
 [dependencies.whisper-rs]
 git = "https://github.com/tazz4843/whisper-rs"
