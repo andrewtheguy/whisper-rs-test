@@ -1,13 +1,13 @@
 use hound::{self};
 use reqwest::get;
-use sqlx::{sqlite::{SqliteConnectOptions, SqliteQueryResult}, Pool, SqlitePool};
+use sqlx::{sqlite::SqliteQueryResult, Pool, SqlitePool};
 use tempfile::NamedTempFile;
 use url::Url;
 
 use crate::{config::Config, silero::{self, Silero}, streaming::streaming_url, utils};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
-use std::{fs::{self}, io::Write, path::Path, sync::{Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}};
+use std::{fs::{self}, io::Write, path::Path, time::{SystemTime, UNIX_EPOCH}};
 use serde_json::json;
 
 use zhconv::{zhconv, Variant};
@@ -246,20 +246,21 @@ pub async fn transcribe_url(config: Config) -> Result<(), Box<dyn std::error::Er
 
     let url = config.url.as_str();
 
-        // Create a connection pool to the SQLite database
-        let pool = SqlitePool::connect_with(SqliteConnectOptions::new()
-        .filename("./tmp/example.db")
-        .create_if_missing(true)).await?;
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS transcripts (
-                    id INTEGER PRIMARY KEY,
-                    timestamp datetime NOT NULL,
-                    content TEXT NOT NULL
-            )"
-        ) .execute(&pool)
-        .await?;
+    let mut pool: Option<Pool<_>> = None;
 
-    
+    if let Some(database_file_path) = &config.database_file_path {
+        // Create a connection pool to the SQLite database
+        let pool2 = SqlitePool::connect(database_file_path).await?;
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS transcripts (
+                        id INTEGER PRIMARY KEY,
+                        timestamp datetime NOT NULL,
+                        content TEXT NOT NULL
+                )"
+            ) .execute(&pool2)
+            .await?;
+        pool = Some(pool2);
+    }
 
 
     // Load a context and model.
@@ -308,17 +309,8 @@ pub async fn transcribe_url(config: Config) -> Result<(), Box<dyn std::error::Er
 
     let rt = tokio::runtime::Handle::try_current()?;
 
-    sqlx::query(
-        r#"
-        INSERT INTO transcripts (timestamp, content) VALUES ($1, $2)
-        "#,
-    )
-    .bind(1)
-    .bind("test")
-    .execute(&pool).await.expect("failed to insert data into the table");
 
     let language = config.language.clone();
-    let arc = Arc::new(pool);
     params.set_segment_callback_safe(   move |data: whisper_rs::SegmentCallbackData| {
         
         let start = SystemTime::now();
@@ -340,29 +332,22 @@ pub async fn transcribe_url(config: Config) -> Result<(), Box<dyn std::error::Er
                 data.text
             }
         };
+
         
-        let arc= arc.clone();
-
-        rt.spawn(async {
-            println!("now running on a worker thread");
-        });
-
-            let arc_clone = arc.clone();
+async{
+        if let Some(pool2) = &pool {
             // Insert data into the table
-            rt.spawn(async move {
-                sqlx::query(
+            sqlx::query(
                 r#"
-                "INSERT INTO transcripts (timestamp, content) VALUES (?1, ?2)"
+                "INSERT INTO transcripts (timestamp, content) VALUES (gfdgfdgdf)"
                 "#,
             )
             .bind(since_the_epoch.as_millis() as f64/1000.0)
             .bind(db_save_text)
-            .execute(arc_clone.as_ref()).await.expect("failed to insert data into the table");
-        println!("inserted data into the table!!!");
-            });
+            .execute(pool2).await.expect("failed to insert data into the table");
             //rt.block_on(fut).expect("failed to insert data into the table");
-      
-    
+        }
+};
 
     });
 
